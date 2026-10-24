@@ -30,13 +30,13 @@ OctoFit Tracker is a three-tier application for a school fitness program. The st
 
 Record your plan here before editing code.
 
-- Presentation tier decision:
-- Logic tier decision:
-- Data tier decision:
-- Activity tracking approach:
-- Team management approach:
-- Leaderboard approach:
-- Workout suggestions approach:
+- Presentation tier decision: Each route component (Activities, Teams, Leaderboard, Workouts) loads data only through `getJson` from `src/api/client.ts`, using relative `/api` paths that the Vite dev server on port 5173 proxies to Express on 8000. A small shared hook tracks loading, empty, success and error states, which render as `role="status"` messages, Bootstrap tables and `role="alert"` errors.
+- Logic tier decision: Express routes in `src/routes/api.ts` stay thin and delegate to `src/services/octofitService.ts`. Services validate input and throw errors with a deliberate HTTP status (400 for invalid input, 404 for unknown records). The app error handler maps Mongoose validation and cast errors to 400, so bad input never becomes a 500.
+- Data tier decision: Mongoose schemas with `required` validation, enums and min values for User, Team, Activity and Workout, stored in MongoDB on port 27017. The seed script upserts stable fixtures keyed by email, team name, workout title and activity timestamp, so it is idempotent and never deletes unrelated records.
+- Activity tracking approach: `POST /api/activities` checks that `userId` and `teamId` are well-formed ObjectIds for an existing user and team, that `type` is a known activity and `minutes` is a positive number, then stores the activity with computed `points` (minutes times an intensity factor per type) and `occurredAt`. `GET` lists activities, newest first.
+- Team management approach: `POST /api/teams` requires `name` and `mascot` (400 otherwise), validates that `members` are ObjectIds of existing users, and keeps those users' `team` field in sync. `GET` lists teams with their member IDs.
+- Leaderboard approach: Sum activity `points` per team with an aggregation, include teams that have no activity yet with 0 points, sort by `totalPoints` (highest first, then by name) and add a 1-based `rank`.
+- Workout suggestions approach: Look up the user by email (404 if not found), map their 10 most recent activities to a focus (run, cycle, swim and walk build endurance; strength builds strength; yoga builds mobility), use the most frequent focus or fall back to the user's `fitnessGoal`, and return workouts with matching workouts first. Each suggestion includes a `reason` that explains the match.
 
 ## Test plan
 
@@ -47,3 +47,16 @@ Record the commands you run and what each failure means.
 - Frontend command: `npm test --prefix octofit-tracker/frontend`
 - Backend build command: `npm run build --prefix octofit-tracker/backend`
 - Frontend build command: `npm run build --prefix octofit-tracker/frontend`
+
+### Baseline (before implementation)
+
+- `npm run test:data --prefix octofit-tracker/backend`: 4 of 5 fail. The schemas have no `required` validation; the seed test already passes.
+- `npm run test:api --prefix octofit-tracker/backend`: 4 of 4 fail. Create endpoints return 501, the leaderboard is empty and suggestions ignore the user.
+- `npm test --prefix octofit-tracker/frontend`: 15 of 15 fail. Components are placeholders with no API calls or loading, empty and error states.
+
+### Implementation order
+
+1. Data tier: add schema validation, then extend the seed data and confirm it stays idempotent.
+2. Logic tier: activities, then teams, then leaderboard, then workout suggestions, running the API tests after each.
+3. Presentation tier: shared state handling, then one route at a time, running the frontend tests after each.
+4. Run all suites plus both builds, then open a pull request.
